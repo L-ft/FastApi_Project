@@ -5,173 +5,124 @@ from ..db import get_db
 from .. import models, schemas
 from ..auth import get_current_user
 from datetime import datetime
-from ..models import Environment, EnvironmentVariable as ORMEnvironmentVariable
-from ..schemas import EnvironmentVariable, EnvironmentVariableCreate, EnvironmentVariableUpdate
-import logging
 
 router = APIRouter()
 
-# 获取模块日志记录器
-logger = logging.getLogger(__name__)
+# ---------------- 环境管理API ----------------
 
-# 环境变量
-@router.get("/env-vars", response_model=list[EnvironmentVariable])
-def read_env_vars(db: Session = Depends(get_db)):
-    """
-    获取所有环境变量
+@router.get("/environments", response_model=List[schemas.Environment])
+def get_environments(db: Session = Depends(get_db)):
+    """获取所有环境（自动修正，手动构造 Environment，避免文档卡死）"""
+    envs = db.query(models.Environment).all()
+    result = [schemas.Environment(
+        id=e.id,
+        name=e.name,
+        value=e.value,
+        description=e.description,
+        created_at=e.created_at,
+        updated_at=e.updated_at
+    ) for e in envs]
+    return result
 
-    参数:
-    db (Session): 数据库会话对象
-
-    返回:
-    list[EnvironmentVariable]: 环境变量对象列表
-    """
-    logger.info("Fetching all environment variables")
-    env_vars = db.query(ORMEnvironmentVariable).all()
-    return env_vars
-
-@router.get("/env-vars/{env_var_id}", response_model=EnvironmentVariable)
-def read_env_var(env_var_id: int, db: Session = Depends(get_db)):
-    """
-    根据ID获取特定环境变量
-
-    参数:
-    env_var_id (int): 环境变量的唯一标识
-    db (Session): 数据库会话对象
-
-    返回:
-    EnvironmentVariable: 请求的环境变量对象
-
-    异常:
-    HTTPException: 如果未找到对应ID的环境变量，则抛出404错误
-    """
-    logger.info(f"Fetching environment variable with ID: {env_var_id}")
-    env_var = db.query(ORMEnvironmentVariable).filter(ORMEnvironmentVariable.id == env_var_id).first()
-    if not env_var:
-        logger.warning(f"Environment variable not found: {env_var_id}")
-        raise HTTPException(status_code=404, detail="环境变量不存在")
-    return env_var
-
-@router.post("/env-vars", response_model=EnvironmentVariable)
-def create_env_var(env_var: EnvironmentVariableCreate, db: Session = Depends(get_db)):
-    """
-    创建新的环境变量
-
-    参数:
-    env_var (EnvironmentVariableCreate): 包含新环境变量信息的对象
-    db (Session): 数据库会话对象
-
-    返回:
-    EnvironmentVariable: 创建成功的环境变量对象
-    """
-    db_env_var = ORMEnvironmentVariable(**env_var.dict())
-    db.add(db_env_var)
+@router.post("/environments", response_model=schemas.Environment)
+def create_environment(env: schemas.EnvironmentCreate, db: Session = Depends(get_db)):
+    """创建新环境"""
+    # 检查环境名是否已存在
+    if db.query(models.Environment).filter(models.Environment.name == env.name).first():
+        raise HTTPException(status_code=400, detail="环境名称已存在")
+    
+    db_env = models.Environment(**env.dict())
+    db.add(db_env)
     db.commit()
-    db.refresh(db_env_var)
-    return db_env_var
+    db.refresh(db_env)
+    return db_env
 
-@router.put("/env-vars/{env_var_id}", response_model=EnvironmentVariable)
-def update_env_var(env_var_id: int, env_var: EnvironmentVariableCreate, db: Session = Depends(get_db)):
-    """
-    更新指定ID的环境变量信息
-
-    参数:
-    env_var_id (int): 环境变量的唯一标识
-    env_var (EnvironmentVariableCreate): 包含更新信息的对象
-    db (Session): 数据库会话对象
-
-    返回:
-    EnvironmentVariable: 更新后的环境变量对象
-
-    异常:
-    HTTPException: 如果未找到对应ID的环境变量，则抛出404错误
-    """
-    db_env_var = db.query(ORMEnvironmentVariable).filter(ORMEnvironmentVariable.id == env_var_id).first()
-    if not db_env_var:
-        raise HTTPException(status_code=404, detail="环境变量不存在")
-    for key, value in env_var.dict().items():
-        setattr(db_env_var, key, value)
+@router.put("/environments/{env_id}", response_model=schemas.Environment)
+def update_environment(env_id: int, env: schemas.EnvironmentUpdate, db: Session = Depends(get_db)):
+    """更新环境信息"""
+    db_env = db.query(models.Environment).filter(models.Environment.id == env_id).first()
+    if not db_env:
+        raise HTTPException(status_code=404, detail="环境不存在")
+    
+    # 如果更新名称，检查新名称是否与其他环境冲突
+    if env.name and env.name != db_env.name:
+        if db.query(models.Environment).filter(models.Environment.name == env.name).first():
+            raise HTTPException(status_code=400, detail="环境名称已存在")
+    
+    for field, value in env.dict(exclude_unset=True).items():
+        setattr(db_env, field, value)
+    
+    db_env.updated_at = datetime.utcnow()
     db.commit()
-    db.refresh(db_env_var)
-    return db_env_var
+    db.refresh(db_env)
+    return db_env
 
-@router.delete("/env-vars/{env_var_id}")
-def delete_env_var(env_var_id: int, db: Session = Depends(get_db)):
-    """
-    删除指定ID的环境变量
-
-    参数:
-    env_var_id (int): 环境变量的唯一标识
-    db (Session): 数据库会话对象
-
-    返回:
-    dict: 删除操作结果消息
-
-    异常:
-    HTTPException: 如果未找到对应ID的环境变量，则抛出404错误
-    """
-    db_env_var = db.query(ORMEnvironmentVariable).filter(ORMEnvironmentVariable.id == env_var_id).first()
-    if not db_env_var:
-        raise HTTPException(status_code=404, detail="环境变量不存在")
-    db.delete(db_env_var)
+@router.delete("/environments/{env_id}")
+def delete_environment(env_id: int, db: Session = Depends(get_db)):
+    """删除环境"""
+    db_env = db.query(models.Environment).filter(models.Environment.id == env_id).first()
+    if not db_env:
+        raise HTTPException(status_code=404, detail="环境不存在")
+    
+    db.delete(db_env)
     db.commit()
-    return {"msg": "环境变量删除成功"}
+    return {"status": "success", "message": "环境已删除"}
 
-# 获取所有环境变量
-@router.get("/env-variables", response_model=List[EnvironmentVariable])
-def get_environment_variables(
-    db: Session = Depends(get_db),
-    current_user: models.UserDB = Depends(get_current_user)
-):
-    variables = db.query(ORMEnvironmentVariable).all()
-    return variables
+# ---------------- 环境变量管理API ----------------
 
-# 创建新环境变量
-@router.post("/env-variables", response_model=EnvironmentVariable)
-def create_environment_variable(
-    variable: EnvironmentVariableCreate,
-    db: Session = Depends(get_db),
-    current_user: models.UserDB = Depends(get_current_user)
-):
+@router.get("/env-variables", response_model=List[schemas.EnvironmentVariable])
+def get_environment_variables(db: Session = Depends(get_db)):
+    """获取所有环境变量（自动修正，手动构造 EnvironmentVariable，避免文档卡死）"""
+    vars = db.query(models.EnvironmentVariable).all()
+    result = [schemas.EnvironmentVariable(
+        id=v.id,
+        env_id=v.env_id,
+        key=v.key,
+        value=v.value,
+        created_at=v.created_at,
+        updated_at=v.updated_at
+    ) for v in vars]
+    return result
+
+@router.post("/env-variables", response_model=schemas.EnvironmentVariable)
+def create_environment_variable(variable: schemas.EnvironmentVariableCreate, db: Session = Depends(get_db)):
+    """创建新环境变量"""
     # 检查环境是否存在
-    env = db.query(Environment).filter(Environment.id == variable.env_id).first()
-    if not env:
-        raise HTTPException(status_code=404, detail="Environment not found")
+    if not db.query(models.Environment).filter(models.Environment.id == variable.env_id).first():
+        raise HTTPException(status_code=404, detail="所选环境不存在")
     
-    # 检查变量名是否已存在于同一环境中
-    existing = db.query(ORMEnvironmentVariable).filter(
-        ORMEnvironmentVariable.env_id == variable.env_id,
-        ORMEnvironmentVariable.key == variable.key
-    ).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Variable key already exists in this environment")
+    # 检查变量名是否在同一环境中重复
+    if db.query(models.EnvironmentVariable).filter(
+        models.EnvironmentVariable.env_id == variable.env_id,
+        models.EnvironmentVariable.key == variable.key
+    ).first():
+        raise HTTPException(status_code=400, detail="变量名在该环境中已存在")
     
-    db_var = ORMEnvironmentVariable(**variable.dict())
+    db_var = models.EnvironmentVariable(**variable.dict())
     db.add(db_var)
     db.commit()
     db.refresh(db_var)
     return db_var
 
-# 更新环境变量
 @router.put("/env-variables/{var_id}", response_model=schemas.EnvironmentVariable)
-def update_environment_variable(
-    var_id: int,
-    variable: schemas.EnvironmentVariableUpdate,
-    db: Session = Depends(get_db),
-    current_user: models.UserDB = Depends(get_current_user)
-):
+def update_environment_variable(var_id: int, variable: schemas.EnvironmentVariableUpdate, db: Session = Depends(get_db)):
+    """更新环境变量"""
     db_var = db.query(models.EnvironmentVariable).filter(models.EnvironmentVariable.id == var_id).first()
     if not db_var:
-        raise HTTPException(status_code=404, detail="Environment variable not found")
+        raise HTTPException(status_code=404, detail="环境变量不存在")
     
-    # 如果要更新key，检查新key是否与其他变量冲突
-    if variable.key and variable.key != db_var.key:
-        existing = db.query(models.EnvironmentVariable).filter(
-            models.EnvironmentVariable.env_id == db_var.env_id,
+    # 如果更新环境ID，检查环境是否存在
+    if variable.env_id is not None:
+        if not db.query(models.Environment).filter(models.Environment.id == variable.env_id).first():
+            raise HTTPException(status_code=404, detail="所选环境不存在")
+    
+    # 如果更新变量名，检查是否在同一环境中重复
+    if variable.key is not None and variable.key != db_var.key:
+        if db.query(models.EnvironmentVariable).filter(
+            models.EnvironmentVariable.env_id == (variable.env_id or db_var.env_id),
             models.EnvironmentVariable.key == variable.key
-        ).first()
-        if existing:
-            raise HTTPException(status_code=400, detail="Variable key already exists in this environment")
+        ).first():
+            raise HTTPException(status_code=400, detail="变量名在该环境中已存在")
     
     for field, value in variable.dict(exclude_unset=True).items():
         setattr(db_var, field, value)
@@ -181,17 +132,13 @@ def update_environment_variable(
     db.refresh(db_var)
     return db_var
 
-# 删除环境变量
 @router.delete("/env-variables/{var_id}")
-def delete_environment_variable(
-    var_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.UserDB = Depends(get_current_user)
-):
+def delete_environment_variable(var_id: int, db: Session = Depends(get_db)):
+    """删除环境变量"""
     db_var = db.query(models.EnvironmentVariable).filter(models.EnvironmentVariable.id == var_id).first()
     if not db_var:
-        raise HTTPException(status_code=404, detail="Environment variable not found")
+        raise HTTPException(status_code=404, detail="环境变量不存在")
     
     db.delete(db_var)
     db.commit()
-    return {"status": "success", "message": "Environment variable deleted"}
+    return {"status": "success", "message": "环境变量已删除"}

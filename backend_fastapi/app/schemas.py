@@ -47,8 +47,7 @@ class ApiGroupOut(BaseModel):
     """
     id: int
     name: str
-    class Config:
-        orm_mode = True
+    model_config = {"from_attributes": True}
 
 class ApiGroupUpdate(BaseModel):
     """
@@ -87,6 +86,8 @@ class ApiInfoOut(BaseModel):
         url (str): API地址
         method (str): HTTP方法类型
         group_id (Optional[int]): 所属API组ID
+        env_id (Optional[int]): 关联的环境ID
+        env_name: Optional[str] = None  # 环境名称（非数据库字段）
         description (Optional[str]): API描述信息
     """
     id: int
@@ -95,12 +96,35 @@ class ApiInfoOut(BaseModel):
     method: str
     group_id: Optional[int]
     env_id: Optional[int]
+    env_name: Optional[str] = None
     description: Optional[str]
-    class Config:
-        orm_mode = True
+    model_config = {"from_attributes": True}
 
 
-# ---------------- 环境变量管理 ----------------
+# ---------------- 环境管理Pydantic ----------------
+class EnvironmentBase(BaseModel):
+    """环境基础模型"""
+    name: str
+    value: str
+    description: Optional[str] = None
+
+class EnvironmentCreate(EnvironmentBase):
+    """用于创建环境的请求模型"""
+    pass
+
+class EnvironmentUpdate(BaseModel):
+    """用于更新环境的请求模型"""
+    name: Optional[str] = None
+    value: Optional[str] = None
+    description: Optional[str] = None
+
+class Environment(EnvironmentBase):
+    """环境的响应模型"""
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
 
 # ---------------- 环境变量Pydantic ----------------
 class EnvironmentVariableBase(BaseModel):
@@ -115,6 +139,7 @@ class EnvironmentVariableCreate(EnvironmentVariableBase):
 
 class EnvironmentVariableUpdate(BaseModel):
     """用于更新环境变量的请求模型"""
+    env_id: Optional[int] = None
     key: Optional[str] = None
     value: Optional[str] = None
 
@@ -124,8 +149,7 @@ class EnvironmentVariable(EnvironmentVariableBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = {"from_attributes": True}
 
 # ---------------- 用例管理Pydantic ----------------
 class TestCaseCreate(BaseModel):
@@ -187,8 +211,7 @@ class TestCaseOut(BaseModel):
     body: Optional[Dict[str, Any]]
     expected_status: int
     expected_response: Optional[Dict[str, Any]]
-    class Config:
-        orm_mode = True
+    model_config = {"from_attributes": True}
 
 class TestCaseUpdate(BaseModel):
     """
@@ -243,8 +266,7 @@ class TestCaseGroupOut(BaseModel):
     id: int
     name: str
     description: Optional[str]
-    class Config:
-        orm_mode = True
+    model_config = {"from_attributes": True}
 
 class TestCaseGroupUpdate(BaseModel):
     """

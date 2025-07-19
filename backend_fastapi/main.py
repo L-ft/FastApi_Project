@@ -28,7 +28,7 @@ app.add_middleware(
 Base.metadata.create_all(bind=engine)
 
 # --------------    路由注册--------------
-# 注册用户认证路由
+# 注册用户相关路由
 app.include_router(user.router)
-# API管理路由
+# 注册API管理相关路由
 app.include_router(api.router)
